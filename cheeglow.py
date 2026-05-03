@@ -509,6 +509,11 @@ class ConfigManager:
         "pos_y": 100,
         "width": 380,
         "height": 380,
+        "mode": "综合",
+        "time_width": 320,
+        "time_height": 100,
+        "countdown_timer_w": 400,
+        "countdown_timer_h": 220,
     }
 
     def __init__(self):
@@ -607,6 +612,8 @@ class CheeGlowWidget(ctk.CTk):
         self._countdown_after_id = None
         self._resize_edge = None
         self._resize_start = None
+        self._countdown_timer_win = None
+        self._mode = self.config_mgr.get("mode", "综合")
 
         self._setup_window()
         self._apply_theme()
@@ -622,8 +629,13 @@ class CheeGlowWidget(ctk.CTk):
         self.title(APP_NAME)
         self.overrideredirect(True)
 
-        w = self.config_mgr.get("width", 380)
-        h = self.config_mgr.get("height", 380)
+        mode = self.config_mgr.get("mode", "综合")
+        if mode == "时间":
+            w = self.config_mgr.get("time_width", 320)
+            h = self.config_mgr.get("time_height", 100)
+        else:
+            w = self.config_mgr.get("width", 380)
+            h = self.config_mgr.get("height", 380)
         x = self.config_mgr.get("pos_x", 100)
         y = self.config_mgr.get("pos_y", 100)
         self.geometry(f"{w}x{h}+{x}+{y}")
@@ -763,21 +775,66 @@ class CheeGlowWidget(ctk.CTk):
         self._resize_start = None
         self.config_mgr.save()
 
-    def _build_ctx_menu(self):
-        menu = tk.Menu(self, tearoff=0, font=(FONT_FAMILY, 11))
-        menu.add_command(label="⚙  设置", command=self._open_settings)
-        menu.add_separator()
-        menu.add_command(label="✕  退出", command=self._on_close)
-        return menu
-
     def _on_right_click(self, event):
-        menu = self._build_ctx_menu()
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        theme = self._theme
+        popup = ctk.CTkToplevel(self)
+        popup.overrideredirect(True)
+        popup.attributes("-topmost", True)
+        popup.configure(fg_color=theme["card"])
+        popup.geometry(f"160x130+{event.x_root}+{event.y_root}")
+        popup.resizable(False, False)
+
+        def _close_popup():
+            try:
+                popup.destroy()
+            except Exception:
+                pass
+
+        def _make_btn(parent, text, cmd):
+            btn = ctk.CTkButton(
+                parent, text=text,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+                height=36, corner_radius=10, width=148,
+                fg_color="transparent",
+                text_color=theme["text"],
+                hover_color=theme["accent_dim"],
+                anchor="w",
+                command=lambda: (_close_popup(), cmd()),
+            )
+            btn.pack(fill="x", padx=6, pady=(4, 0))
+            return btn
+
+        frame = ctk.CTkFrame(popup, fg_color="transparent", corner_radius=14)
+        frame.pack(fill="both", expand=True, padx=0, pady=0)
+
+        _make_btn(frame, "⚙  设置", self._open_settings)
+        _make_btn(frame, "⏱  倒计时", self._open_countdown_settings)
+
+        sep = ctk.CTkFrame(frame, height=1, fg_color=theme["accent_dim"])
+        sep.pack(fill="x", padx=12, pady=4)
+
+        _make_btn(frame, "✕  退出", self._on_close)
+
+        popup.bind("<FocusOut>", lambda e: _close_popup())
+        popup.focus_set()
 
     def _create_ui(self):
+        self._mode = self.config_mgr.get("mode", "综合")
+        if self._mode == "时间":
+            self._create_ui_time()
+        else:
+            self._create_ui_comprehensive()
+
+        for widget in [self]:
+            widget.bind("<ButtonPress-1>", self._on_press)
+            widget.bind("<B1-Motion>", self._on_motion)
+            widget.bind("<ButtonRelease-1>", self._on_release)
+            widget.bind("<Motion>", self._on_mouse_move)
+            widget.bind("<Button-3>", self._on_right_click)
+
+        self._bind_children(self.main_frame)
+
+    def _create_ui_comprehensive(self):
         theme = self._theme
 
         self.main_frame = ctk.CTkFrame(
@@ -837,14 +894,26 @@ class CheeGlowWidget(ctk.CTk):
         )
         self.countdown_label.pack(pady=(0, 16))
 
-        for widget in [self]:
-            widget.bind("<ButtonPress-1>", self._on_press)
-            widget.bind("<B1-Motion>", self._on_motion)
-            widget.bind("<ButtonRelease-1>", self._on_release)
-            widget.bind("<Motion>", self._on_mouse_move)
-            widget.bind("<Button-3>", self._on_right_click)
+    def _create_ui_time(self):
+        theme = self._theme
 
-        self._bind_children(self.main_frame)
+        self.main_frame = ctk.CTkFrame(
+            self, corner_radius=16, fg_color=theme["card"], border_width=0
+        )
+        self.main_frame.pack(fill="both", expand=True, padx=6, pady=6)
+
+        self.clock_label = ctk.CTkLabel(
+            self.main_frame, text="00:00:00",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=48, weight="bold"),
+            text_color=theme["text"],
+        )
+        self.clock_label.pack(expand=True, padx=16)
+
+        self.date_label = None
+        self.weather_icon_label = None
+        self.weather_city_label = None
+        self.weather_detail_label = None
+        self.countdown_label = None
 
     def _bind_children(self, parent):
         for child in parent.winfo_children():
@@ -861,33 +930,43 @@ class CheeGlowWidget(ctk.CTk):
     def _tick(self):
         now = datetime.now()
         self.clock_label.configure(text=now.strftime("%H:%M:%S"))
-        weekday = WEEKDAYS_CN[now.weekday()]
-        self.date_label.configure(text=f"{now.year}年{now.month}月{now.day}日  {weekday}")
+        if self._mode == "综合" and self.date_label:
+            weekday = WEEKDAYS_CN[now.weekday()]
+            self.date_label.configure(text=f"{now.year}年{now.month}月{now.day}日  {weekday}")
         self.after(1000, self._tick)
 
     def _fetch_weather(self):
         if self._weather_after_id:
             self.after_cancel(self._weather_after_id)
         city = self.config_mgr.get("city", "北京")
-        self.weather_city_label.configure(text=f"{city} · 加载中...")
+        if self._mode == "综合" and self.weather_city_label:
+            self.weather_city_label.configure(text=f"{city} · 加载中...")
         self.weather_svc.fetch_async(city, self._on_weather_received)
         self._weather_after_id = self.after(1800000, self._fetch_weather)
 
     def _on_weather_received(self, result):
+        if self._mode != "综合":
+            return
         try:
             icon = get_weather_icon(result["desc"])
-            self.weather_icon_label.configure(text=icon)
+            if self.weather_icon_label:
+                self.weather_icon_label.configure(text=icon)
             city = self.config_mgr.get("city", "北京")
-            self.weather_city_label.configure(text=f"{city} · {result['desc']}")
-            self.weather_detail_label.configure(
-                text=f"🌡️ {result['temp']}°C  体感{result['feels_like']}°C  💧 {result['humidity']}%"
-            )
+            if self.weather_city_label:
+                self.weather_city_label.configure(text=f"{city} · {result['desc']}")
+            if self.weather_detail_label:
+                self.weather_detail_label.configure(
+                    text=f"🌡️ {result['temp']}°C  体感{result['feels_like']}°C  💧 {result['humidity']}%"
+                )
         except Exception:
             pass
 
     def _update_countdown(self):
         if self._countdown_after_id:
             self.after_cancel(self._countdown_after_id)
+        if self._mode != "综合" or not self.countdown_label:
+            self._countdown_after_id = self.after(60000, self._update_countdown)
+            return
         name = self.config_mgr.get("countdown_name", "春节")
         date_str = self.config_mgr.get("countdown_date", "2027-02-06")
         try:
@@ -910,9 +989,36 @@ class CheeGlowWidget(ctk.CTk):
             return
         self._settings_win = SettingsWindow(self)
 
+    def _open_countdown_settings(self):
+        if self._countdown_timer_win and self._countdown_timer_win.winfo_exists():
+            self._countdown_timer_win.focus()
+            return
+        CountdownSettingsWindow(self)
+
+    def refresh_mode(self, mode_name):
+        self._mode = mode_name
+        self.config_mgr.set("mode", mode_name)
+        for widget in self.winfo_children():
+            widget.destroy()
+        self._create_ui()
+        self._fetch_weather()
+        self._update_countdown()
+
+    def refresh_main_size(self, w, h):
+        x = self.winfo_x()
+        y = self.winfo_y()
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        if self._mode == "时间":
+            self.config_mgr.set("time_width", w)
+            self.config_mgr.set("time_height", h)
+        else:
+            self.config_mgr.set("width", w)
+            self.config_mgr.set("height", h)
+
     def refresh_theme(self, theme_name):
         self.current_theme = theme_name
         self.config_mgr.set("theme", theme_name)
+        self._mode = self.config_mgr.get("mode", "综合")
         self._apply_theme()
         for widget in self.winfo_children():
             widget.destroy()
@@ -946,7 +1052,7 @@ class SettingsWindow(ctk.CTkToplevel):
         theme = parent._theme
 
         self.title(f"{APP_NAME} 设置")
-        self.geometry("460x700+200+150")
+        self.geometry("460x940+200+150")
         self.configure(fg_color=theme["bg"])
         self.resizable(False, False)
         self.attributes("-topmost", True)
@@ -1107,6 +1213,160 @@ class SettingsWindow(ctk.CTkToplevel):
             )
             btn.pack(side="left", padx=3, pady=2)
 
+        # ─── 显示模式 ───
+        mode_section = ctk.CTkFrame(container, fg_color="transparent")
+        mode_section.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            mode_section, text="🖥️ 显示模式",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            mode_section, text="综合：时钟+天气+倒数日｜时间：仅显示时分秒",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            text_color=theme["subtext"],
+        ).pack(anchor="w", pady=(2, 0))
+
+        self.mode_var = tk.StringVar(value=self.config_mgr.get("mode", "综合"))
+
+        mode_row = ctk.CTkFrame(mode_section, fg_color="transparent")
+        mode_row.pack(fill="x", pady=(8, 0))
+
+        self.mode_buttons_frame = mode_row
+
+        for m in ["综合", "时间"]:
+            is_sel = m == self.mode_var.get()
+            ctk.CTkButton(
+                mode_row,
+                text=m, width=100, height=34,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=13,
+                                  weight="bold" if is_sel else "normal"),
+                fg_color=theme["accent"] if is_sel else theme["card"],
+                text_color=theme["button_text"] if is_sel else theme["text"],
+                hover_color=theme["accent"],
+                corner_radius=10,
+                command=lambda v=m: self._on_mode_select(v),
+            ).pack(side="left", padx=4)
+
+        # ─── 主窗口尺寸（综合模式） ───
+        main_size_section = ctk.CTkFrame(container, fg_color="transparent")
+        main_size_section.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            main_size_section, text="📐 综合模式窗口尺寸",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w")
+
+        size_row1 = ctk.CTkFrame(main_size_section, fg_color="transparent")
+        size_row1.pack(fill="x", pady=(8, 0))
+
+        ctk.CTkLabel(
+            size_row1, text="宽度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.main_w_var = tk.IntVar(value=self.config_mgr.get("width", 380))
+        ctk.CTkEntry(
+            size_row1, textvariable=self.main_w_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left", padx=(0, 16))
+
+        ctk.CTkLabel(
+            size_row1, text="高度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.main_h_var = tk.IntVar(value=self.config_mgr.get("height", 380))
+        ctk.CTkEntry(
+            size_row1, textvariable=self.main_h_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left")
+
+        # ─── 时间模式窗口尺寸 ───
+        time_size_section = ctk.CTkFrame(container, fg_color="transparent")
+        time_size_section.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            time_size_section, text="📐 时间模式窗口尺寸（横幅）",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w")
+
+        size_row_time = ctk.CTkFrame(time_size_section, fg_color="transparent")
+        size_row_time.pack(fill="x", pady=(8, 0))
+
+        ctk.CTkLabel(
+            size_row_time, text="宽度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.time_w_var = tk.IntVar(value=self.config_mgr.get("time_width", 320))
+        ctk.CTkEntry(
+            size_row_time, textvariable=self.time_w_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left", padx=(0, 16))
+
+        ctk.CTkLabel(
+            size_row_time, text="高度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.time_h_var = tk.IntVar(value=self.config_mgr.get("time_height", 100))
+        ctk.CTkEntry(
+            size_row_time, textvariable=self.time_h_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left")
+
+        # ─── 倒计时窗口尺寸 ───
+        timer_size_section = ctk.CTkFrame(container, fg_color="transparent")
+        timer_size_section.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            timer_size_section, text="📐 倒计时窗口尺寸",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w")
+
+        size_row2 = ctk.CTkFrame(timer_size_section, fg_color="transparent")
+        size_row2.pack(fill="x", pady=(8, 0))
+
+        ctk.CTkLabel(
+            size_row2, text="宽度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.timer_w_var = tk.IntVar(value=self.config_mgr.get("countdown_timer_w", 400))
+        ctk.CTkEntry(
+            size_row2, textvariable=self.timer_w_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left", padx=(0, 16))
+
+        ctk.CTkLabel(
+            size_row2, text="高度：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="left")
+        self.timer_h_var = tk.IntVar(value=self.config_mgr.get("countdown_timer_h", 220))
+        ctk.CTkEntry(
+            size_row2, textvariable=self.timer_h_var, width=80, height=30,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(side="left")
+
         # ─── 倒数日设置 ───
         countdown_section = ctk.CTkFrame(container, fg_color="transparent")
         countdown_section.pack(fill="x", pady=(0, 16))
@@ -1218,75 +1478,353 @@ class SettingsWindow(ctk.CTkToplevel):
             except Exception:
                 pass
 
+    def _on_mode_select(self, mode_name):
+        self.mode_var.set(mode_name)
+        theme = self.parent._theme
+        for widget in self.mode_buttons_frame.winfo_children():
+            btn_name = widget.cget("text")
+            is_sel = btn_name == mode_name
+            try:
+                widget.configure(
+                    fg_color=theme["accent"] if is_sel else theme["card"],
+                    text_color=theme["button_text"] if is_sel else theme["text"],
+                    font=ctk.CTkFont(
+                        family=FONT_FAMILY, size=13,
+                        weight="bold" if is_sel else "normal",
+                    ),
+                )
+            except Exception:
+                pass
+
     def _save(self):
         self.config_mgr.set("city", self._city_var.get().strip())
         self.config_mgr.set("opacity", self.opacity_var.get())
         self.config_mgr.set("theme", self.selected_theme.get())
         self.config_mgr.set("countdown_name", self.countdown_name_var.get().strip())
         self.config_mgr.set("countdown_date", self.countdown_date_var.get().strip())
+        self.config_mgr.set("mode", self.mode_var.get())
+
+        try:
+            main_w = max(MIN_WIDTH, int(self.main_w_var.get()))
+        except (ValueError, tk.TclError):
+            main_w = self.config_mgr.get("width", 380)
+        try:
+            main_h = max(MIN_HEIGHT, int(self.main_h_var.get()))
+        except (ValueError, tk.TclError):
+            main_h = self.config_mgr.get("height", 380)
+        self.config_mgr.set("width", main_w)
+        self.config_mgr.set("height", main_h)
+
+        try:
+            time_w = max(200, int(self.time_w_var.get()))
+        except (ValueError, tk.TclError):
+            time_w = self.config_mgr.get("time_width", 320)
+        try:
+            time_h = max(60, int(self.time_h_var.get()))
+        except (ValueError, tk.TclError):
+            time_h = self.config_mgr.get("time_height", 100)
+        self.config_mgr.set("time_width", time_w)
+        self.config_mgr.set("time_height", time_h)
+
+        try:
+            timer_w = max(200, int(self.timer_w_var.get()))
+        except (ValueError, tk.TclError):
+            timer_w = self.config_mgr.get("countdown_timer_w", 400)
+        try:
+            timer_h = max(150, int(self.timer_h_var.get()))
+        except (ValueError, tk.TclError):
+            timer_h = self.config_mgr.get("countdown_timer_h", 220)
+        self.config_mgr.set("countdown_timer_w", timer_w)
+        self.config_mgr.set("countdown_timer_h", timer_h)
 
         new_theme = self.selected_theme.get()
         if new_theme != self.parent.current_theme:
             self.parent.refresh_theme(new_theme)
 
+        new_mode = self.mode_var.get()
+        if new_mode != self.parent._mode:
+            self.parent.refresh_mode(new_mode)
+            if new_mode == "时间":
+                self.parent.refresh_main_size(time_w, time_h)
+            else:
+                self.parent.refresh_main_size(main_w, main_h)
+        else:
+            if new_mode == "时间":
+                self.parent.refresh_main_size(time_w, time_h)
+            else:
+                self.parent.refresh_main_size(main_w, main_h)
+
         self.parent.refresh_weather()
         self.parent.refresh_countdown()
 
         self.grab_release()
-        self._show_countdown_popup()
         self.destroy()
 
-    def _show_countdown_popup(self):
-        name = self.countdown_name_var.get().strip()
-        date_str = self.countdown_date_var.get().strip()
-        theme = self.parent._theme
 
-        try:
-            target = datetime.strptime(date_str, "%Y-%m-%d").date()
-            today = datetime.now().date()
-            diff = (target - today).days
-            if diff > 0:
-                msg = f"距离「{name}」还有 {diff} 天\n目标日期：{date_str}"
-                title_text = "📅 倒数日确认"
-            elif diff == 0:
-                msg = f"🎉 今天就是「{name}」！\n目标日期：{date_str}"
-                title_text = "📅 倒数日确认"
-            else:
-                msg = f"「{name}」已过 {abs(diff)} 天\n目标日期：{date_str}"
-                title_text = "📅 倒数日确认"
-        except ValueError:
-            msg = "日期格式错误，请使用 YYYY-MM-DD 格式"
-            title_text = "⚠ 格式错误"
 
-        popup = ctk.CTkToplevel(self)
-        popup.title(title_text)
-        popup.geometry("320x180+300+250")
-        popup.configure(fg_color=theme["bg"])
-        popup.attributes("-topmost", True)
-        popup.resizable(False, False)
+
+class CountdownSettingsWindow(ctk.CTkToplevel):
+    def __init__(self, parent: CheeGlowWidget):
+        super().__init__(parent)
+        self.parent = parent
+        self.config_mgr = parent.config_mgr
+        theme = parent._theme
+
+        self.title(f"{APP_NAME} 倒计时设置")
+        self.geometry("400x380+300+200")
+        self.configure(fg_color=theme["bg"])
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.grab_set()
+
+        self._hours_var = tk.StringVar(value="0")
+        self._minutes_var = tk.StringVar(value="5")
+        self._seconds_var = tk.StringVar(value="0")
+        self._name_var = tk.StringVar(value="倒计时")
+
+        self._create_ui(theme)
+
+    def _create_ui(self, theme):
+        container = ctk.CTkFrame(self, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=24, pady=20)
 
         ctk.CTkLabel(
-            popup, text=title_text,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=16, weight="bold"),
+            container, text="⏱  倒计时设置",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=20, weight="bold"),
             text_color=theme["accent"],
-        ).pack(pady=(20, 8))
+        ).pack(pady=(0, 20), anchor="w")
+
+        name_section = ctk.CTkFrame(container, fg_color="transparent")
+        name_section.pack(fill="x", pady=(0, 16))
 
         ctk.CTkLabel(
-            popup, text=msg,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=14),
+            name_section, text="名称：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=theme["text"],
-            justify="center",
-        ).pack(pady=(0, 16))
+        ).pack(anchor="w")
+
+        ctk.CTkEntry(
+            name_section, textvariable=self._name_var,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13), height=36,
+            fg_color=theme["card"], text_color=theme["text"],
+            border_color=theme["accent_dim"],
+        ).pack(fill="x", pady=(4, 0))
+
+        time_section = ctk.CTkFrame(container, fg_color="transparent")
+        time_section.pack(fill="x", pady=(0, 20))
+
+        ctk.CTkLabel(
+            time_section, text="时长：",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w", pady=(0, 8))
+
+        time_row = ctk.CTkFrame(time_section, fg_color="transparent")
+        time_row.pack(fill="x")
+
+        for label_text, var in [("时", self._hours_var),
+                                ("分", self._minutes_var),
+                                ("秒", self._seconds_var)]:
+            col = ctk.CTkFrame(time_row, fg_color="transparent")
+            col.pack(side="left", expand=True, fill="x", padx=4)
+            ctk.CTkEntry(
+                col, textvariable=var, width=80, height=40,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=18, weight="bold"),
+                fg_color=theme["card"], text_color=theme["text"],
+                border_color=theme["accent_dim"], justify="center",
+            ).pack()
+            ctk.CTkLabel(
+                col, text=label_text,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                text_color=theme["subtext"],
+            ).pack(pady=(2, 0))
 
         ctk.CTkButton(
-            popup, text="确定", width=100, height=34,
+            container, text="▶  开始倒计时",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=15, weight="bold"),
+            height=44, corner_radius=14,
+            fg_color=theme["accent"],
+            text_color=theme["button_text"],
+            hover_color=theme["card"],
+            command=self._start,
+        ).pack(fill="x")
+
+    def _start(self):
+        try:
+            h = max(0, int(self._hours_var.get() or 0))
+            m = max(0, int(self._minutes_var.get() or 0))
+            s = max(0, int(self._seconds_var.get() or 0))
+        except ValueError:
+            h, m, s = 0, 5, 0
+
+        total = h * 3600 + m * 60 + s
+        if total <= 0:
+            return
+
+        name = self._name_var.get().strip() or "倒计时"
+        self.grab_release()
+        self.destroy()
+        self.parent._countdown_timer_win = CountdownTimerWindow(self.parent, name, total)
+
+
+class CountdownTimerWindow(ctk.CTkToplevel):
+    def __init__(self, parent: CheeGlowWidget, name: str, total_seconds: int):
+        super().__init__(parent)
+        self.parent = parent
+        self.config_mgr = parent.config_mgr
+        self._theme = parent._theme
+        self._timer_name = name
+        self._total = total_seconds
+        self._remaining = total_seconds
+        self._paused = False
+        self._after_id = None
+
+        w = self.config_mgr.get("countdown_timer_w", 400)
+        h = self.config_mgr.get("countdown_timer_h", 220)
+
+        self.title(f"{APP_NAME} - {name}")
+        self.geometry(f"{w}x{h}+300+200")
+        self.configure(fg_color=TRANSPARENT_COLOR)
+        self.overrideredirect(True)
+        self.attributes("-alpha", self.config_mgr.get("opacity", 0.85))
+        self.attributes("-topmost", True)
+
+        if platform.system() == "Windows":
+            try:
+                self.update_idletasks()
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+                if not hwnd:
+                    hwnd = int(self.winfo_id())
+                class MARGINS(ctypes.Structure):
+                    _fields_ = [
+                        ("cxLeftWidth", ctypes.c_int),
+                        ("cxRightWidth", ctypes.c_int),
+                        ("cyTopHeight", ctypes.c_int),
+                        ("cyBottomHeight", ctypes.c_int),
+                    ]
+                margins = MARGINS(-1, -1, -1, -1)
+                ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
+            except Exception:
+                pass
+        self.attributes("-transparentcolor", TRANSPARENT_COLOR)
+
+        self._drag_offset = (0, 0)
+        self._create_ui()
+        self._tick()
+
+    def _create_ui(self):
+        theme = self._theme
+
+        self.main_frame = ctk.CTkFrame(
+            self, corner_radius=20, fg_color=theme["card"], border_width=0
+        )
+        self.main_frame.pack(fill="both", expand=True, padx=6, pady=6)
+
+        self.name_label = ctk.CTkLabel(
+            self.main_frame, text=self._timer_name,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["accent"],
+        )
+        self.name_label.pack(pady=(16, 0))
+
+        self.time_label = ctk.CTkLabel(
+            self.main_frame, text=self._format_time(self._remaining),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=48, weight="bold"),
+            text_color=theme["text"],
+        )
+        self.time_label.pack(pady=(4, 0))
+
+        self.progress_bar = ctk.CTkProgressBar(
+            self.main_frame, height=6, corner_radius=3,
+            fg_color=theme["accent_dim"],
+            progress_color=theme["accent"],
+        )
+        self.progress_bar.pack(fill="x", padx=24, pady=(8, 8))
+        self.progress_bar.set(1.0)
+
+        btn_row = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        btn_row.pack(pady=(0, 12))
+
+        self.pause_btn = ctk.CTkButton(
+            btn_row, text="⏸ 暂停", width=100, height=34,
             font=ctk.CTkFont(family=FONT_FAMILY, size=13),
             corner_radius=10,
             fg_color=theme["accent"],
             text_color=theme["button_text"],
             hover_color=theme["card"],
-            command=popup.destroy,
-        ).pack(pady=(0, 16))
+            command=self._toggle_pause,
+        )
+        self.pause_btn.pack(side="left", padx=6)
+
+        ctk.CTkButton(
+            btn_row, text="⏹ 停止", width=100, height=34,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            corner_radius=10,
+            fg_color=theme["card"],
+            text_color=theme["text"],
+            hover_color=theme["accent_dim"],
+            command=self._stop,
+        ).pack(side="left", padx=6)
+
+        self.main_frame.bind("<ButtonPress-1>", self._on_press)
+        self.main_frame.bind("<B1-Motion>", self._on_motion)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_motion)
+
+    def _format_time(self, seconds):
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def _tick(self):
+        if self._paused:
+            self._after_id = self.after(200, self._tick)
+            return
+
+        if self._remaining <= 0:
+            self._on_finished()
+            return
+
+        self.time_label.configure(text=self._format_time(self._remaining))
+        progress = self._remaining / self._total if self._total > 0 else 0
+        self.progress_bar.set(progress)
+
+        self._remaining -= 1
+        self._after_id = self.after(1000, self._tick)
+
+    def _toggle_pause(self):
+        self._paused = not self._paused
+        if self._paused:
+            self.pause_btn.configure(text="▶ 继续")
+        else:
+            self.pause_btn.configure(text="⏸ 暂停")
+
+    def _stop(self):
+        if self._after_id:
+            self.after_cancel(self._after_id)
+        self.parent._countdown_timer_win = None
+        self.destroy()
+
+    def _on_finished(self):
+        self.time_label.configure(text="⏰ 时间到!", text_color=self._theme["accent"])
+        self.progress_bar.set(0)
+        self.pause_btn.configure(state="disabled")
+
+    def _on_press(self, event):
+        self._drag_offset = (event.x, event.y)
+
+    def _on_motion(self, event):
+        x = self.winfo_x() + event.x - self._drag_offset[0]
+        y = self.winfo_y() + event.y - self._drag_offset[1]
+        self.geometry(f"+{x}+{y}")
+
+    def destroy(self):
+        if self._after_id:
+            self.after_cancel(self._after_id)
+        super().destroy()
 
 
 if __name__ == "__main__":
