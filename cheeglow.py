@@ -514,6 +514,8 @@ class ConfigManager:
         "time_height": 100,
         "countdown_timer_w": 400,
         "countdown_timer_h": 220,
+        "show_countdown": True,
+        "weather_interval": 30,
     }
 
     def __init__(self):
@@ -548,6 +550,7 @@ class WeatherService:
         self.cache = {}
         self.cache_time = 0
         self.cache_duration = 1800
+        self.last_update_str = ""
 
     def get_weather(self, city):
         now = time.time()
@@ -576,6 +579,7 @@ class WeatherService:
                 }
                 self.cache[city] = result
                 self.cache_time = now
+                self.last_update_str = datetime.now().strftime("%H:%M")
                 return result
         except Exception as e:
             print(f"获取天气失败: {e}")
@@ -624,6 +628,7 @@ class CheeGlowWidget(ctk.CTk):
         self._fetch_weather()
         self._update_countdown()
         self._keep_on_all_desktops()
+        self.after(100, self._update_fonts)
 
     def _setup_window(self):
         self.title(APP_NAME)
@@ -727,6 +732,62 @@ class CheeGlowWidget(ctk.CTk):
             return "bottom"
         return None
 
+    def _get_scale(self):
+        if self._mode == "时间":
+            base_w, base_h = 320, 100
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w < 2:
+                w = self.config_mgr.get("time_width", 320)
+            if h < 2:
+                h = self.config_mgr.get("time_height", 100)
+        else:
+            base_w, base_h = 380, 380
+            w = self.winfo_width()
+            h = self.winfo_height()
+            if w < 2:
+                w = self.config_mgr.get("width", 380)
+            if h < 2:
+                h = self.config_mgr.get("height", 380)
+            if not self.config_mgr.get("show_countdown", True):
+                base_h = 280
+        scale_w = w / base_w if base_w > 0 else 1
+        scale_h = h / base_h if base_h > 0 else 1
+        return (scale_w + scale_h) / 2
+
+    def _update_fonts(self):
+        scale = self._get_scale()
+        if self._mode == "时间":
+            if hasattr(self, 'clock_label') and self.clock_label:
+                self.clock_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(48 * scale)), weight="bold")
+                )
+        else:
+            if hasattr(self, 'clock_label') and self.clock_label:
+                self.clock_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(42 * scale)), weight="bold")
+                )
+            if hasattr(self, 'date_label') and self.date_label:
+                self.date_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(13 * scale)))
+                )
+            if hasattr(self, 'weather_icon_label') and self.weather_icon_label:
+                self.weather_icon_label.configure(
+                    font=ctk.CTkFont(family=FONT_EMOJI, size=max(1, int(28 * scale)))
+                )
+            if hasattr(self, 'weather_city_label') and self.weather_city_label:
+                self.weather_city_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(13 * scale)), weight="bold")
+                )
+            if hasattr(self, 'weather_detail_label') and self.weather_detail_label:
+                self.weather_detail_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(11 * scale)))
+                )
+            if hasattr(self, 'countdown_label') and self.countdown_label:
+                self.countdown_label.configure(
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(36 * scale)), weight="bold")
+                )
+
     def _get_cursor_for_edge(self, edge):
         return {"right": "sb_h_double_arrow", "bottom": "sb_v_double_arrow",
                 "corner": "bottom_right_corner"}.get(edge, "")
@@ -763,6 +824,7 @@ class CheeGlowWidget(ctk.CTk):
             self.geometry(f"{new_w}x{new_h}+{x}+{y}")
             self.config_mgr.set("width", new_w)
             self.config_mgr.set("height", new_h)
+            self._update_fonts()
         else:
             x = self.winfo_x() + event.x - self._drag_offset[0]
             y = self.winfo_y() + event.y - self._drag_offset[1]
@@ -786,6 +848,7 @@ class CheeGlowWidget(ctk.CTk):
 
         def _close_popup():
             try:
+                self.unbind_all("<Button-1>")
                 popup.destroy()
             except Exception:
                 pass
@@ -815,6 +878,15 @@ class CheeGlowWidget(ctk.CTk):
 
         _make_btn(frame, "✕  退出", self._on_close)
 
+        def _on_global_click(e):
+            px = popup.winfo_rootx()
+            py = popup.winfo_rooty()
+            pw = popup.winfo_width()
+            ph = popup.winfo_height()
+            if not (px <= e.x_root <= px + pw and py <= e.y_root <= py + ph):
+                _close_popup()
+
+        self.bind_all("<Button-1>", _on_global_click)
         popup.bind("<FocusOut>", lambda e: _close_popup())
         popup.focus_set()
 
@@ -887,12 +959,15 @@ class CheeGlowWidget(ctk.CTk):
             self.main_frame, height=1, fg_color=theme["accent_dim"]
         ).pack(fill="x", padx=24, pady=8)
 
-        self.countdown_label = ctk.CTkLabel(
-            self.main_frame, text="",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=42, weight="bold"),
-            text_color=theme["accent"],
-        )
-        self.countdown_label.pack(pady=(0, 16))
+        if self.config_mgr.get("show_countdown", True):
+            self.countdown_label = ctk.CTkLabel(
+                self.main_frame, text="",
+                font=ctk.CTkFont(family=FONT_FAMILY, size=36, weight="bold"),
+                text_color=theme["accent"],
+            )
+            self.countdown_label.pack(pady=(0, 16))
+        else:
+            self.countdown_label = None
 
     def _create_ui_time(self):
         theme = self._theme
@@ -942,7 +1017,8 @@ class CheeGlowWidget(ctk.CTk):
         if self._mode == "综合" and self.weather_city_label:
             self.weather_city_label.configure(text=f"{city} · 加载中...")
         self.weather_svc.fetch_async(city, self._on_weather_received)
-        self._weather_after_id = self.after(1800000, self._fetch_weather)
+        interval_ms = self.config_mgr.get("weather_interval", 30) * 60 * 1000
+        self._weather_after_id = self.after(interval_ms, self._fetch_weather)
 
     def _on_weather_received(self, result):
         if self._mode != "综合":
@@ -955,8 +1031,10 @@ class CheeGlowWidget(ctk.CTk):
             if self.weather_city_label:
                 self.weather_city_label.configure(text=f"{city} · {result['desc']}")
             if self.weather_detail_label:
+                update_time = self.weather_svc.last_update_str
+                update_info = f"  更新于{update_time}" if update_time else ""
                 self.weather_detail_label.configure(
-                    text=f"🌡️ {result['temp']}°C  体感{result['feels_like']}°C  💧 {result['humidity']}%"
+                    text=f"🌡️ {result['temp']}°C  体感{result['feels_like']}°C  💧 {result['humidity']}%{update_info}"
                 )
         except Exception:
             pass
@@ -1014,6 +1092,8 @@ class CheeGlowWidget(ctk.CTk):
         else:
             self.config_mgr.set("width", w)
             self.config_mgr.set("height", h)
+        self.update_idletasks()
+        self._update_fonts()
 
     def refresh_theme(self, theme_name):
         self.current_theme = theme_name
@@ -1134,6 +1214,37 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self.county_menu.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
+        # ─── 天气更新频率 ───
+        weather_interval_section = ctk.CTkFrame(container, fg_color="transparent")
+        weather_interval_section.pack(fill="x", pady=(0, 16))
+
+        interval_row = ctk.CTkFrame(weather_interval_section, fg_color="transparent")
+        interval_row.pack(fill="x")
+
+        ctk.CTkLabel(
+            interval_row, text="🔄 天气更新频率",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(side="left")
+
+        self.weather_interval_var = tk.StringVar(
+            value=str(self.config_mgr.get("weather_interval", 30))
+        )
+        ctk.CTkOptionMenu(
+            interval_row,
+            values=["5", "10", "15", "30", "60"],
+            variable=self.weather_interval_var,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11), height=30,
+            fg_color=theme["card"], button_color=theme["accent"],
+            text_color=theme["text"], dropdown_fg_color=theme["card"],
+            width=80,
+        ).pack(side="right")
+        ctk.CTkLabel(
+            interval_row, text="分钟",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            text_color=theme["subtext"],
+        ).pack(side="right", padx=(4, 0))
+
         # ─── 透明度 ───
         opacity_section = ctk.CTkFrame(container, fg_color="transparent")
         opacity_section.pack(fill="x", pady=(0, 16))
@@ -1144,20 +1255,20 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=theme["text"],
         ).pack(anchor="w")
 
-        self.opacity_var = tk.DoubleVar(
-            value=self.config_mgr.get("opacity", 0.85)
+        self.opacity_var = tk.IntVar(
+            value=int(self.config_mgr.get("opacity", 0.85) * 100)
         )
 
         opacity_slider_frame = ctk.CTkFrame(opacity_section, fg_color="transparent")
         opacity_slider_frame.pack(fill="x", pady=(8, 0))
 
         ctk.CTkLabel(
-            opacity_slider_frame, text="0.3",
+            opacity_slider_frame, text="30%",
             font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=theme["subtext"],
         ).pack(side="left")
 
         self.opacity_slider = ctk.CTkSlider(
-            opacity_slider_frame, from_=0.3, to=1.0,
+            opacity_slider_frame, from_=30, to=100,
             variable=self.opacity_var, number_of_steps=70,
             command=self._on_opacity_change,
             button_color=theme["accent"],
@@ -1167,13 +1278,13 @@ class SettingsWindow(ctk.CTkToplevel):
         self.opacity_slider.pack(side="left", fill="x", expand=True, padx=8)
 
         ctk.CTkLabel(
-            opacity_slider_frame, text="1.0",
+            opacity_slider_frame, text="100%",
             font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=theme["subtext"],
         ).pack(side="left")
 
         self.opacity_value_label = ctk.CTkLabel(
             opacity_section,
-            text=f"当前：{self.opacity_var.get():.2f}",
+            text=f"当前：{int(self.opacity_var.get())}%",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["accent"],
         )
@@ -1260,34 +1371,60 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=theme["text"],
         ).pack(anchor="w")
 
-        size_row1 = ctk.CTkFrame(main_size_section, fg_color="transparent")
-        size_row1.pack(fill="x", pady=(8, 0))
+        main_preset_row = ctk.CTkFrame(main_size_section, fg_color="transparent")
+        main_preset_row.pack(fill="x", pady=(6, 0))
+        for label, pw, ph in [("小", 280, 280), ("标准", 380, 380), ("大", 520, 520)]:
+            ctk.CTkButton(
+                main_preset_row, text=f"{label} {pw}×{ph}", width=100, height=30,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                fg_color=theme["card"], text_color=theme["text"],
+                hover_color=theme["accent_dim"], corner_radius=8,
+                command=lambda w=pw, h=ph: (self.main_w_var.set(w), self.main_h_var.set(h)),
+            ).pack(side="left", padx=3)
+
+        size_row_w = ctk.CTkFrame(main_size_section, fg_color="transparent")
+        size_row_w.pack(fill="x", pady=(8, 0))
 
         ctk.CTkLabel(
-            size_row1, text="宽度：",
+            size_row_w, text="宽度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.main_w_var = tk.IntVar(value=self.config_mgr.get("width", 380))
         ctk.CTkEntry(
-            size_row1, textvariable=self.main_w_var, width=80, height=30,
+            size_row_w, textvariable=self.main_w_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left", padx=(0, 16))
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_row_w, from_=200, to=1000,
+            variable=self.main_w_var, number_of_steps=160,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
+
+        size_row_h = ctk.CTkFrame(main_size_section, fg_color="transparent")
+        size_row_h.pack(fill="x", pady=(4, 0))
 
         ctk.CTkLabel(
-            size_row1, text="高度：",
+            size_row_h, text="高度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.main_h_var = tk.IntVar(value=self.config_mgr.get("height", 380))
         ctk.CTkEntry(
-            size_row1, textvariable=self.main_h_var, width=80, height=30,
+            size_row_h, textvariable=self.main_h_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_row_h, from_=60, to=600,
+            variable=self.main_h_var, number_of_steps=108,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
 
         # ─── 时间模式窗口尺寸 ───
         time_size_section = ctk.CTkFrame(container, fg_color="transparent")
@@ -1299,34 +1436,60 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=theme["text"],
         ).pack(anchor="w")
 
-        size_row_time = ctk.CTkFrame(time_size_section, fg_color="transparent")
-        size_row_time.pack(fill="x", pady=(8, 0))
+        time_preset_row = ctk.CTkFrame(time_size_section, fg_color="transparent")
+        time_preset_row.pack(fill="x", pady=(6, 0))
+        for label, pw, ph in [("小", 240, 60), ("标准", 320, 100), ("大", 480, 120)]:
+            ctk.CTkButton(
+                time_preset_row, text=f"{label} {pw}×{ph}", width=100, height=30,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                fg_color=theme["card"], text_color=theme["text"],
+                hover_color=theme["accent_dim"], corner_radius=8,
+                command=lambda w=pw, h=ph: (self.time_w_var.set(w), self.time_h_var.set(h)),
+            ).pack(side="left", padx=3)
+
+        size_time_w = ctk.CTkFrame(time_size_section, fg_color="transparent")
+        size_time_w.pack(fill="x", pady=(8, 0))
 
         ctk.CTkLabel(
-            size_row_time, text="宽度：",
+            size_time_w, text="宽度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.time_w_var = tk.IntVar(value=self.config_mgr.get("time_width", 320))
         ctk.CTkEntry(
-            size_row_time, textvariable=self.time_w_var, width=80, height=30,
+            size_time_w, textvariable=self.time_w_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left", padx=(0, 16))
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_time_w, from_=200, to=1000,
+            variable=self.time_w_var, number_of_steps=160,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
+
+        size_time_h = ctk.CTkFrame(time_size_section, fg_color="transparent")
+        size_time_h.pack(fill="x", pady=(4, 0))
 
         ctk.CTkLabel(
-            size_row_time, text="高度：",
+            size_time_h, text="高度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.time_h_var = tk.IntVar(value=self.config_mgr.get("time_height", 100))
         ctk.CTkEntry(
-            size_row_time, textvariable=self.time_h_var, width=80, height=30,
+            size_time_h, textvariable=self.time_h_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_time_h, from_=60, to=600,
+            variable=self.time_h_var, number_of_steps=108,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
 
         # ─── 倒计时窗口尺寸 ───
         timer_size_section = ctk.CTkFrame(container, fg_color="transparent")
@@ -1338,44 +1501,74 @@ class SettingsWindow(ctk.CTkToplevel):
             text_color=theme["text"],
         ).pack(anchor="w")
 
-        size_row2 = ctk.CTkFrame(timer_size_section, fg_color="transparent")
-        size_row2.pack(fill="x", pady=(8, 0))
+        size_timer_w = ctk.CTkFrame(timer_size_section, fg_color="transparent")
+        size_timer_w.pack(fill="x", pady=(8, 0))
 
         ctk.CTkLabel(
-            size_row2, text="宽度：",
+            size_timer_w, text="宽度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.timer_w_var = tk.IntVar(value=self.config_mgr.get("countdown_timer_w", 400))
         ctk.CTkEntry(
-            size_row2, textvariable=self.timer_w_var, width=80, height=30,
+            size_timer_w, textvariable=self.timer_w_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left", padx=(0, 16))
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_timer_w, from_=200, to=1000,
+            variable=self.timer_w_var, number_of_steps=160,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
+
+        size_timer_h = ctk.CTkFrame(timer_size_section, fg_color="transparent")
+        size_timer_h.pack(fill="x", pady=(4, 0))
 
         ctk.CTkLabel(
-            size_row2, text="高度：",
+            size_timer_h, text="高度：",
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             text_color=theme["subtext"],
         ).pack(side="left")
         self.timer_h_var = tk.IntVar(value=self.config_mgr.get("countdown_timer_h", 220))
         ctk.CTkEntry(
-            size_row2, textvariable=self.timer_h_var, width=80, height=30,
+            size_timer_h, textvariable=self.timer_h_var, width=70, height=30,
             font=ctk.CTkFont(family=FONT_FAMILY, size=12),
             fg_color=theme["card"], text_color=theme["text"],
             border_color=theme["accent_dim"],
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkSlider(
+            size_timer_h, from_=60, to=600,
+            variable=self.timer_h_var, number_of_steps=108,
+            button_color=theme["accent"], button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="left", fill="x", expand=True)
 
         # ─── 倒数日设置 ───
         countdown_section = ctk.CTkFrame(container, fg_color="transparent")
         countdown_section.pack(fill="x", pady=(0, 16))
 
+        countdown_header = ctk.CTkFrame(countdown_section, fg_color="transparent")
+        countdown_header.pack(fill="x")
+
         ctk.CTkLabel(
-            countdown_section, text="📅 倒数日设置",
+            countdown_header, text="📅 倒数日设置",
             font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
             text_color=theme["text"],
-        ).pack(anchor="w")
+        ).pack(side="left")
+
+        self.show_countdown_var = tk.BooleanVar(
+            value=self.config_mgr.get("show_countdown", True)
+        )
+        ctk.CTkSwitch(
+            countdown_header, text="显示",
+            variable=self.show_countdown_var,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            button_color=theme["accent"],
+            button_hover_color=theme["accent"],
+            progress_color=theme["accent"],
+        ).pack(side="right")
 
         ctk.CTkLabel(
             countdown_section, text="名称：",
@@ -1456,8 +1649,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self._city_var.set(county_name)
 
     def _on_opacity_change(self, value):
-        self.opacity_value_label.configure(text=f"当前：{float(value):.2f}")
-        self.parent.refresh_opacity(value)
+        self.opacity_value_label.configure(text=f"当前：{int(float(value))}%")
+        self.parent.refresh_opacity(float(value) / 100.0)
 
     def _on_theme_select(self, name):
         self.selected_theme.set(name)
@@ -1498,11 +1691,13 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _save(self):
         self.config_mgr.set("city", self._city_var.get().strip())
-        self.config_mgr.set("opacity", self.opacity_var.get())
+        self.config_mgr.set("opacity", self.opacity_var.get() / 100.0)
         self.config_mgr.set("theme", self.selected_theme.get())
         self.config_mgr.set("countdown_name", self.countdown_name_var.get().strip())
         self.config_mgr.set("countdown_date", self.countdown_date_var.get().strip())
         self.config_mgr.set("mode", self.mode_var.get())
+        self.config_mgr.set("show_countdown", self.show_countdown_var.get())
+        self.config_mgr.set("weather_interval", int(self.weather_interval_var.get()))
 
         try:
             main_w = max(MIN_WIDTH, int(self.main_w_var.get()))
@@ -1538,6 +1733,10 @@ class SettingsWindow(ctk.CTkToplevel):
         self.config_mgr.set("countdown_timer_h", timer_h)
 
         new_theme = self.selected_theme.get()
+        old_show_countdown = self.config_mgr.get("show_countdown", True)
+        new_show_countdown = self.show_countdown_var.get()
+        need_rebuild = (old_show_countdown != new_show_countdown)
+
         if new_theme != self.parent.current_theme:
             self.parent.refresh_theme(new_theme)
 
@@ -1548,6 +1747,13 @@ class SettingsWindow(ctk.CTkToplevel):
                 self.parent.refresh_main_size(time_w, time_h)
             else:
                 self.parent.refresh_main_size(main_w, main_h)
+        elif need_rebuild and new_mode == "综合":
+            for widget in self.parent.winfo_children():
+                widget.destroy()
+            self.parent._create_ui()
+            self.parent._fetch_weather()
+            self.parent._update_countdown()
+            self.parent.refresh_main_size(main_w, main_h)
         else:
             if new_mode == "时间":
                 self.parent.refresh_main_size(time_w, time_h)
