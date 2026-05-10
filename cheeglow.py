@@ -20,6 +20,14 @@ import platform
 if platform.system() == "Windows":
     import ctypes
 
+    class MARGINS(ctypes.Structure):
+        _fields_ = [
+            ("cxLeftWidth", ctypes.c_int),
+            ("cxRightWidth", ctypes.c_int),
+            ("cyTopHeight", ctypes.c_int),
+            ("cyBottomHeight", ctypes.c_int),
+        ]
+
 APP_NAME = "CheeGlow"
 if getattr(sys, 'frozen', False):
     APP_DIR = os.path.dirname(sys.executable)
@@ -514,8 +522,8 @@ class ConfigManager:
         "countdown_date": "2027-02-06",
         "pos_x": 100,
         "pos_y": 100,
-        "width": 460,
-        "height": 380,
+        "width": 380,
+        "height": 300,
         "mode": "综合",
         "time_width": 320,
         "time_height": 240,
@@ -650,10 +658,10 @@ class CheeGlowWidget(ctk.CTk):
         mode = self.config_mgr.get("mode", "综合")
         if mode == "时间":
             w = self.config_mgr.get("time_width", 320)
-            h = self.config_mgr.get("time_height", 100)
+            h = self.config_mgr.get("time_height", 240)
         else:
             w = self.config_mgr.get("width", 380)
-            h = self.config_mgr.get("height", 380)
+            h = self.config_mgr.get("height", 300)
         x = self.config_mgr.get("pos_x", 100)
         y = self.config_mgr.get("pos_y", 100)
         self.geometry(f"{w}x{h}+{x}+{y}")
@@ -669,13 +677,6 @@ class CheeGlowWidget(ctk.CTk):
             hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
             if not hwnd:
                 hwnd = int(self.winfo_id())
-            class MARGINS(ctypes.Structure):
-                _fields_ = [
-                    ("cxLeftWidth", ctypes.c_int),
-                    ("cxRightWidth", ctypes.c_int),
-                    ("cyTopHeight", ctypes.c_int),
-                    ("cyBottomHeight", ctypes.c_int),
-                ]
             margins = MARGINS(-1, -1, -1, -1)
             ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
         except Exception:
@@ -706,13 +707,21 @@ class CheeGlowWidget(ctk.CTk):
             return
         if not self._pinned_top:
             self._set_window_level("bottom")
-        self.after(5000, self._keep_on_all_desktops)
+        self.bind("<FocusIn>", self._on_focus_in)
+        self.bind("<FocusOut>", self._on_focus_out)
+
+    def _on_focus_in(self, event=None):
+        if not self._pinned_top:
+            self._set_window_level("bottom")
+
+    def _on_focus_out(self, event=None):
+        if not self._pinned_top:
+            self.after(100, lambda: self._set_window_level("bottom"))
 
     def _set_window_level(self, level):
         if platform.system() != "Windows":
             return
         try:
-            self.update_idletasks()
             hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
             if not hwnd:
                 hwnd = int(self.winfo_id())
@@ -737,8 +746,6 @@ class CheeGlowWidget(ctk.CTk):
         h = self.winfo_height()
         if x >= w - CORNER_SIZE and y >= h - CORNER_SIZE:
             return "corner"
-        if x >= w - EDGE_SIZE and y >= h - EDGE_SIZE:
-            return "corner"
         if x >= w - EDGE_SIZE:
             return "right"
         if y >= h - EDGE_SIZE:
@@ -747,64 +754,68 @@ class CheeGlowWidget(ctk.CTk):
 
     def _get_scale(self):
         if self._mode == "时间":
-            base_w, base_h = 320, 100
+            base_w, base_h = 320, 240
             w = self.winfo_width()
             h = self.winfo_height()
-            if w < 2:
-                w = self.config_mgr.get("time_width", 320)
-            if h < 2:
-                h = self.config_mgr.get("time_height", 100)
+            if w < 2: w = self.config_mgr.get("time_width", 320)
+            if h < 2: h = self.config_mgr.get("time_height", 240)
         else:
-            base_w, base_h = 380, 380
+            base_w, base_h = 380, 300
             w = self.winfo_width()
             h = self.winfo_height()
-            if w < 2:
-                w = self.config_mgr.get("width", 380)
-            if h < 2:
-                h = self.config_mgr.get("height", 380)
+            if w < 2: w = self.config_mgr.get("width", 380)
+            if h < 2: h = self.config_mgr.get("height", 300)
             if not self.config_mgr.get("show_countdown", True):
-                base_h = 280
+                base_h = 220
         scale_w = w / base_w if base_w > 0 else 1
         scale_h = h / base_h if base_h > 0 else 1
         return (scale_w + scale_h) / 2
 
+    def _no_countdown_boost(self):
+        if self._mode != "综合" or self.config_mgr.get("show_countdown", True):
+            return 1.0
+        return 1.3
+
     def _update_fonts(self):
         scale = self._get_scale()
-        fs_clock = self.config_mgr.get("font_scale_clock", 100) / 100.0
-        fs_date = self.config_mgr.get("font_scale_date", 100) / 100.0
-        fs_wi = self.config_mgr.get("font_scale_weather_icon", 100) / 100.0
-        fs_wc = self.config_mgr.get("font_scale_weather_city", 100) / 100.0
-        fs_wd = self.config_mgr.get("font_scale_weather_detail", 100) / 100.0
-        fs_cd = self.config_mgr.get("font_scale_countdown", 100) / 100.0
+        boost = self._no_countdown_boost()
+        fs = {
+            "clock": self.config_mgr.get("font_scale_clock", 100) / 100.0,
+            "date": self.config_mgr.get("font_scale_date", 100) / 100.0,
+            "wi": self.config_mgr.get("font_scale_weather_icon", 100) / 100.0,
+            "wc": self.config_mgr.get("font_scale_weather_city", 100) / 100.0,
+            "wd": self.config_mgr.get("font_scale_weather_detail", 100) / 100.0,
+            "cd": self.config_mgr.get("font_scale_countdown", 100) / 100.0,
+        }
         if self._mode == "时间":
-            if hasattr(self, 'clock_label') and self.clock_label:
+            if self.clock_label:
                 self.clock_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK_TIME_MODE * scale * fs_clock)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK_TIME_MODE * scale * fs["clock"])), weight="bold")
                 )
         else:
-            if hasattr(self, 'clock_label') and self.clock_label:
+            if self.clock_label:
                 self.clock_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK * scale * fs_clock)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK * scale * fs["clock"] * boost)), weight="bold")
                 )
-            if hasattr(self, 'date_label') and self.date_label:
+            if self.date_label:
                 self.date_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_DATE * scale * fs_date)))
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_DATE * scale * fs["date"] * boost)))
                 )
-            if hasattr(self, 'weather_icon_label') and self.weather_icon_label:
+            if self.weather_icon_label:
                 self.weather_icon_label.configure(
-                    font=ctk.CTkFont(family=FONT_EMOJI, size=max(1, int(BASE_FONT_WEATHER_ICON * scale * fs_wi)))
+                    font=ctk.CTkFont(family=FONT_EMOJI, size=max(1, int(BASE_FONT_WEATHER_ICON * scale * fs["wi"] * boost)))
                 )
-            if hasattr(self, 'weather_city_label') and self.weather_city_label:
+            if self.weather_city_label:
                 self.weather_city_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_CITY * scale * fs_wc)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_CITY * scale * fs["wc"] * boost)), weight="bold")
                 )
-            if hasattr(self, 'weather_detail_label') and self.weather_detail_label:
+            if self.weather_detail_label:
                 self.weather_detail_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_DETAIL * scale * fs_wd)))
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_DETAIL * scale * fs["wd"] * boost)))
                 )
-            if hasattr(self, 'countdown_label') and self.countdown_label:
+            if self.countdown_label:
                 self.countdown_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_COUNTDOWN * scale * fs_cd)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_COUNTDOWN * scale * fs["cd"])), weight="bold")
                 )
 
     def _get_cursor_for_edge(self, edge):
@@ -867,6 +878,7 @@ class CheeGlowWidget(ctk.CTk):
 
         def _close_popup():
             try:
+                self.unbind_all("<Button>")
                 self.unbind_all("<Button-1>")
                 popup.destroy()
             except Exception:
@@ -898,16 +910,21 @@ class CheeGlowWidget(ctk.CTk):
         _make_btn(frame, "✕  退出", self._on_close)
 
         def _on_global_click(e):
-            px = popup.winfo_rootx()
-            py = popup.winfo_rooty()
-            pw = popup.winfo_width()
-            ph = popup.winfo_height()
-            if not (px <= e.x_root <= px + pw and py <= e.y_root <= py + ph):
+            try:
+                px = popup.winfo_rootx()
+                py = popup.winfo_rooty()
+                pw = popup.winfo_width()
+                ph = popup.winfo_height()
+                if not (px <= e.x_root <= px + pw and py <= e.y_root <= py + ph):
+                    _close_popup()
+            except Exception:
                 _close_popup()
 
+        self.bind_all("<Button>", _on_global_click)
         self.bind_all("<Button-1>", _on_global_click)
-        popup.bind("<FocusOut>", lambda e: _close_popup())
+        popup.bind("<FocusOut>", lambda e: self.after(50, _close_popup))
         popup.focus_set()
+        self.after(200, popup.focus_force)
 
     def _create_ui(self):
         self._mode = self.config_mgr.get("mode", "综合")
@@ -1061,23 +1078,21 @@ class CheeGlowWidget(ctk.CTk):
     def _update_countdown(self):
         if self._countdown_after_id:
             self.after_cancel(self._countdown_after_id)
-        if self._mode != "综合" or not self.countdown_label:
-            self._countdown_after_id = self.after(60000, self._update_countdown)
-            return
-        name = self.config_mgr.get("countdown_name", "春节")
-        date_str = self.config_mgr.get("countdown_date", "2027-02-06")
-        try:
-            target = datetime.strptime(date_str, "%Y-%m-%d").date()
-            today = datetime.now().date()
-            diff = (target - today).days
-            if diff > 0:
-                self.countdown_label.configure(text=f"📅 距{name} {diff}天")
-            elif diff == 0:
-                self.countdown_label.configure(text=f"🎉 今天{name}!")
-            else:
-                self.countdown_label.configure(text=f"📅 {name}过{abs(diff)}天")
-        except ValueError:
-            self.countdown_label.configure(text="⚠️ 日期格式错误")
+        if self._mode == "综合" and self.countdown_label:
+            name = self.config_mgr.get("countdown_name", "春节")
+            date_str = self.config_mgr.get("countdown_date", "2027-02-06")
+            try:
+                target = datetime.strptime(date_str, "%Y-%m-%d").date()
+                today = datetime.now().date()
+                diff = (target - today).days
+                if diff > 0:
+                    self.countdown_label.configure(text=f"📅 距{name} {diff}天")
+                elif diff == 0:
+                    self.countdown_label.configure(text=f"🎉 今天{name}!")
+                else:
+                    self.countdown_label.configure(text=f"📅 {name}过{abs(diff)}天")
+            except ValueError:
+                self.countdown_label.configure(text="⚠️ 日期格式错误")
         self._countdown_after_id = self.after(60000, self._update_countdown)
 
     def _open_settings(self):
@@ -1392,7 +1407,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         main_preset_row = ctk.CTkFrame(main_size_section, fg_color="transparent")
         main_preset_row.pack(fill="x", pady=(6, 0))
-        for label, pw, ph in [("小", 360, 280), ("标准", 460, 380), ("大", 600, 520)]:
+        for label, pw, ph in [("小", 300, 220), ("标准", 380, 300), ("大", 600, 520)]:
             ctk.CTkButton(
                 main_preset_row, text=f"{label} {pw}×{ph}", width=100, height=30,
                 font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1748,10 +1763,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 widget.configure(
                     fg_color=colors.get("accent", theme["card"]) if is_sel else theme["card"],
                     text_color=colors.get("button_text", theme["text"]) if is_sel else theme["text"],
-                    font=ctk.CTkFont(
-                        family=FONT_FAMILY, size=12,
-                        weight="bold" if is_sel else "normal",
-                    ),
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold" if is_sel else "normal"),
                 )
             except Exception:
                 pass
@@ -1760,16 +1772,12 @@ class SettingsWindow(ctk.CTkToplevel):
         self.mode_var.set(mode_name)
         theme = self.parent._theme
         for widget in self.mode_buttons_frame.winfo_children():
-            btn_name = widget.cget("text")
-            is_sel = btn_name == mode_name
+            is_sel = widget.cget("text") == mode_name
             try:
                 widget.configure(
                     fg_color=theme["accent"] if is_sel else theme["card"],
                     text_color=theme["button_text"] if is_sel else theme["text"],
-                    font=ctk.CTkFont(
-                        family=FONT_FAMILY, size=13,
-                        weight="bold" if is_sel else "normal",
-                    ),
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold" if is_sel else "normal"),
                 )
             except Exception:
                 pass
@@ -1787,36 +1795,24 @@ class SettingsWindow(ctk.CTkToplevel):
         for config_key, var in self._font_scale_vars.items():
             self.config_mgr.set(config_key, var.get())
 
-        try:
-            main_w = max(MIN_WIDTH, int(self.main_w_var.get()))
-        except (ValueError, tk.TclError):
-            main_w = self.config_mgr.get("width", 380)
-        try:
-            main_h = max(MIN_HEIGHT, int(self.main_h_var.get()))
-        except (ValueError, tk.TclError):
-            main_h = self.config_mgr.get("height", 380)
+        def _safe_int(var, min_val, fallback_key):
+            try:
+                return max(min_val, int(var.get()))
+            except (ValueError, tk.TclError):
+                return self.config_mgr.get(fallback_key, min_val)
+
+        main_w = _safe_int(self.main_w_var, MIN_WIDTH, "width")
+        main_h = _safe_int(self.main_h_var, MIN_HEIGHT, "height")
         self.config_mgr.set("width", main_w)
         self.config_mgr.set("height", main_h)
 
-        try:
-            time_w = max(200, int(self.time_w_var.get()))
-        except (ValueError, tk.TclError):
-            time_w = self.config_mgr.get("time_width", 320)
-        try:
-            time_h = max(60, int(self.time_h_var.get()))
-        except (ValueError, tk.TclError):
-            time_h = self.config_mgr.get("time_height", 100)
+        time_w = _safe_int(self.time_w_var, 200, "time_width")
+        time_h = _safe_int(self.time_h_var, 60, "time_height")
         self.config_mgr.set("time_width", time_w)
         self.config_mgr.set("time_height", time_h)
 
-        try:
-            timer_w = max(200, int(self.timer_w_var.get()))
-        except (ValueError, tk.TclError):
-            timer_w = self.config_mgr.get("countdown_timer_w", 400)
-        try:
-            timer_h = max(150, int(self.timer_h_var.get()))
-        except (ValueError, tk.TclError):
-            timer_h = self.config_mgr.get("countdown_timer_h", 220)
+        timer_w = _safe_int(self.timer_w_var, 200, "countdown_timer_w")
+        timer_h = _safe_int(self.timer_h_var, 150, "countdown_timer_h")
         self.config_mgr.set("countdown_timer_w", timer_w)
         self.config_mgr.set("countdown_timer_h", timer_h)
 
@@ -1854,8 +1850,6 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.grab_release()
         self.destroy()
-
-
 
 
 class CountdownSettingsWindow(ctk.CTkToplevel):
@@ -1990,13 +1984,6 @@ class CountdownTimerWindow(ctk.CTkToplevel):
                 hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
                 if not hwnd:
                     hwnd = int(self.winfo_id())
-                class MARGINS(ctypes.Structure):
-                    _fields_ = [
-                        ("cxLeftWidth", ctypes.c_int),
-                        ("cxRightWidth", ctypes.c_int),
-                        ("cyTopHeight", ctypes.c_int),
-                        ("cyBottomHeight", ctypes.c_int),
-                    ]
                 margins = MARGINS(-1, -1, -1, -1)
                 ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
             except Exception:
