@@ -30,6 +30,13 @@ CONFIG_FILE = os.path.join(APP_DIR, "cheeglow_config.json")
 TRANSPARENT_COLOR = "#010101"
 FONT_FAMILY = "Microsoft YaHei"
 FONT_EMOJI = "Segoe UI Emoji"
+BASE_FONT_CLOCK = 42
+BASE_FONT_CLOCK_TIME_MODE = 48
+BASE_FONT_DATE = 13
+BASE_FONT_WEATHER_ICON = 28
+BASE_FONT_WEATHER_CITY = 13
+BASE_FONT_WEATHER_DETAIL = 11
+BASE_FONT_COUNTDOWN = 48
 EDGE_SIZE = 8
 CORNER_SIZE = 16
 MIN_WIDTH = 300
@@ -507,15 +514,21 @@ class ConfigManager:
         "countdown_date": "2027-02-06",
         "pos_x": 100,
         "pos_y": 100,
-        "width": 380,
+        "width": 460,
         "height": 380,
         "mode": "综合",
         "time_width": 320,
-        "time_height": 100,
+        "time_height": 240,
         "countdown_timer_w": 400,
         "countdown_timer_h": 220,
         "show_countdown": True,
         "weather_interval": 30,
+        "font_scale_clock": 100,
+        "font_scale_date": 100,
+        "font_scale_weather_icon": 100,
+        "font_scale_weather_city": 100,
+        "font_scale_weather_detail": 100,
+        "font_scale_countdown": 100,
     }
 
     def __init__(self):
@@ -757,35 +770,41 @@ class CheeGlowWidget(ctk.CTk):
 
     def _update_fonts(self):
         scale = self._get_scale()
+        fs_clock = self.config_mgr.get("font_scale_clock", 100) / 100.0
+        fs_date = self.config_mgr.get("font_scale_date", 100) / 100.0
+        fs_wi = self.config_mgr.get("font_scale_weather_icon", 100) / 100.0
+        fs_wc = self.config_mgr.get("font_scale_weather_city", 100) / 100.0
+        fs_wd = self.config_mgr.get("font_scale_weather_detail", 100) / 100.0
+        fs_cd = self.config_mgr.get("font_scale_countdown", 100) / 100.0
         if self._mode == "时间":
             if hasattr(self, 'clock_label') and self.clock_label:
                 self.clock_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(48 * scale)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK_TIME_MODE * scale * fs_clock)), weight="bold")
                 )
         else:
             if hasattr(self, 'clock_label') and self.clock_label:
                 self.clock_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(42 * scale)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_CLOCK * scale * fs_clock)), weight="bold")
                 )
             if hasattr(self, 'date_label') and self.date_label:
                 self.date_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(13 * scale)))
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_DATE * scale * fs_date)))
                 )
             if hasattr(self, 'weather_icon_label') and self.weather_icon_label:
                 self.weather_icon_label.configure(
-                    font=ctk.CTkFont(family=FONT_EMOJI, size=max(1, int(28 * scale)))
+                    font=ctk.CTkFont(family=FONT_EMOJI, size=max(1, int(BASE_FONT_WEATHER_ICON * scale * fs_wi)))
                 )
             if hasattr(self, 'weather_city_label') and self.weather_city_label:
                 self.weather_city_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(13 * scale)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_CITY * scale * fs_wc)), weight="bold")
                 )
             if hasattr(self, 'weather_detail_label') and self.weather_detail_label:
                 self.weather_detail_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(11 * scale)))
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_WEATHER_DETAIL * scale * fs_wd)))
                 )
             if hasattr(self, 'countdown_label') and self.countdown_label:
                 self.countdown_label.configure(
-                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(36 * scale)), weight="bold")
+                    font=ctk.CTkFont(family=FONT_FAMILY, size=max(1, int(BASE_FONT_COUNTDOWN * scale * fs_cd)), weight="bold")
                 )
 
     def _get_cursor_for_edge(self, edge):
@@ -916,14 +935,14 @@ class CheeGlowWidget(ctk.CTk):
 
         self.clock_label = ctk.CTkLabel(
             self.main_frame, text="00:00:00",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=42, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_CLOCK, weight="bold"),
             text_color=theme["text"],
         )
         self.clock_label.pack(pady=(20, 0))
 
         self.date_label = ctk.CTkLabel(
             self.main_frame, text="",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_DATE),
             text_color=theme["subtext"],
         )
         self.date_label.pack(pady=(2, 0))
@@ -937,20 +956,20 @@ class CheeGlowWidget(ctk.CTk):
 
         self.weather_icon_label = ctk.CTkLabel(
             weather_center, text="🌤️",
-            font=ctk.CTkFont(family=FONT_EMOJI, size=28),
+            font=ctk.CTkFont(family=FONT_EMOJI, size=BASE_FONT_WEATHER_ICON),
         )
         self.weather_icon_label.pack()
 
         self.weather_city_label = ctk.CTkLabel(
             weather_center, text="加载中...",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_WEATHER_CITY, weight="bold"),
             text_color=theme["text"],
         )
         self.weather_city_label.pack(anchor="center")
 
         self.weather_detail_label = ctk.CTkLabel(
             weather_center, text="",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_WEATHER_DETAIL),
             text_color=theme["subtext"],
         )
         self.weather_detail_label.pack(anchor="center")
@@ -962,7 +981,7 @@ class CheeGlowWidget(ctk.CTk):
         if self.config_mgr.get("show_countdown", True):
             self.countdown_label = ctk.CTkLabel(
                 self.main_frame, text="",
-                font=ctk.CTkFont(family=FONT_FAMILY, size=36, weight="bold"),
+                font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_COUNTDOWN, weight="bold"),
                 text_color=theme["accent"],
             )
             self.countdown_label.pack(pady=(0, 16))
@@ -979,7 +998,7 @@ class CheeGlowWidget(ctk.CTk):
 
         self.clock_label = ctk.CTkLabel(
             self.main_frame, text="00:00:00",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=48, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=BASE_FONT_CLOCK_TIME_MODE, weight="bold"),
             text_color=theme["text"],
         )
         self.clock_label.pack(expand=True, padx=16)
@@ -1373,7 +1392,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         main_preset_row = ctk.CTkFrame(main_size_section, fg_color="transparent")
         main_preset_row.pack(fill="x", pady=(6, 0))
-        for label, pw, ph in [("小", 280, 280), ("标准", 380, 380), ("大", 520, 520)]:
+        for label, pw, ph in [("小", 360, 280), ("标准", 460, 380), ("大", 600, 520)]:
             ctk.CTkButton(
                 main_preset_row, text=f"{label} {pw}×{ph}", width=100, height=30,
                 font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1438,7 +1457,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         time_preset_row = ctk.CTkFrame(time_size_section, fg_color="transparent")
         time_preset_row.pack(fill="x", pady=(6, 0))
-        for label, pw, ph in [("小", 240, 60), ("标准", 320, 100), ("大", 480, 120)]:
+        for label, pw, ph in [("小", 240, 160), ("标准", 320, 240), ("大", 480, 400)]:
             ctk.CTkButton(
                 time_preset_row, text=f"{label} {pw}×{ph}", width=100, height=30,
                 font=ctk.CTkFont(family=FONT_FAMILY, size=11),
@@ -1606,6 +1625,65 @@ class SettingsWindow(ctk.CTkToplevel):
             border_color=theme["accent_dim"],
         ).pack(fill="x")
 
+        # ─── 字号设置 ───
+        font_section = ctk.CTkFrame(container, fg_color="transparent")
+        font_section.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            font_section, text="🔤 字号设置",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=14, weight="bold"),
+            text_color=theme["text"],
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            font_section, text="调节各部分字号百分比（50%~200%），适用于所有窗口大小",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+            text_color=theme["subtext"],
+        ).pack(anchor="w", pady=(2, 0))
+
+        font_items = [
+            ("时钟", "font_scale_clock"),
+            ("日期", "font_scale_date"),
+            ("天气图标", "font_scale_weather_icon"),
+            ("天气城市", "font_scale_weather_city"),
+            ("天气详情", "font_scale_weather_detail"),
+            ("倒数日", "font_scale_countdown"),
+        ]
+
+        self._font_scale_vars = {}
+        self._font_scale_labels = {}
+
+        for label_text, config_key in font_items:
+            row = ctk.CTkFrame(font_section, fg_color="transparent")
+            row.pack(fill="x", pady=(6, 0))
+
+            ctk.CTkLabel(
+                row, text=label_text, width=70,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+                text_color=theme["text"],
+            ).pack(side="left")
+
+            var = tk.IntVar(value=self.config_mgr.get(config_key, 100))
+            self._font_scale_vars[config_key] = var
+
+            val_label = ctk.CTkLabel(
+                row, text=f"{var.get()}%", width=50,
+                font=ctk.CTkFont(family=FONT_FAMILY, size=11),
+                text_color=theme["accent"],
+            )
+            val_label.pack(side="right")
+            self._font_scale_labels[config_key] = val_label
+
+            slider = ctk.CTkSlider(
+                row, from_=50, to=200,
+                variable=var, number_of_steps=30,
+                command=lambda v, k=config_key: self._on_font_scale_change(k, v),
+                button_color=theme["accent"],
+                button_hover_color=theme["accent"],
+                progress_color=theme["accent"],
+            )
+            slider.pack(side="left", fill="x", expand=True, padx=8)
+
         # ─── 保存按钮 ───
         ctk.CTkButton(
             container, text="💾  保存配置",
@@ -1651,6 +1729,13 @@ class SettingsWindow(ctk.CTkToplevel):
     def _on_opacity_change(self, value):
         self.opacity_value_label.configure(text=f"当前：{int(float(value))}%")
         self.parent.refresh_opacity(float(value) / 100.0)
+
+    def _on_font_scale_change(self, config_key, value):
+        pct = int(float(value))
+        if config_key in self._font_scale_labels:
+            self._font_scale_labels[config_key].configure(text=f"{pct}%")
+        self.config_mgr.set(config_key, pct)
+        self.parent._update_fonts()
 
     def _on_theme_select(self, name):
         self.selected_theme.set(name)
@@ -1698,6 +1783,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.config_mgr.set("mode", self.mode_var.get())
         self.config_mgr.set("show_countdown", self.show_countdown_var.get())
         self.config_mgr.set("weather_interval", int(self.weather_interval_var.get()))
+
+        for config_key, var in self._font_scale_vars.items():
+            self.config_mgr.set(config_key, var.get())
 
         try:
             main_w = max(MIN_WIDTH, int(self.main_w_var.get()))
@@ -1762,6 +1850,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.parent.refresh_weather()
         self.parent.refresh_countdown()
+        self.parent._update_fonts()
 
         self.grab_release()
         self.destroy()
